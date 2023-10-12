@@ -99,8 +99,8 @@ fn decrypt_cookie(key: &str, data: &str) -> String {
     let ciphertext = &cookie[15..(cookie.len() - 16)];
     let tag = &cookie[(cookie.len() - 16)..cookie.len()];
 
-    println!("Key length: {}", master.len());
-    println!("Master key decoded: {:?}", base64::decode(master));
+    //println!("Key length: {}", master.len());
+    println!("Decrypted cookie: {:?}", base64::decode(master));
     //err invalid length
     
     // let cipher = Aes256Gcm::new_from_slice(&master).expect("something happened");
